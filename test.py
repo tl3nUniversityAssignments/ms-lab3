@@ -1,26 +1,56 @@
 import numpy as np
 
-with open('y4.txt') as file:
+with open('y9.txt') as file:
     observations = np.array([line.split() for line in file.readlines()], float).T
 
+c1 = 0.14
 c3 = 0.2
-c4 = 0.12
-m1 = 12
+m2 = 28
 m3 = 18
-# c1, c2, m2 невідомі
+# c2, c4, m1 невідомі
 
 # Матриця утворена функціяєю чутливості, використовується для оцінки невідомих параметрів за відоми спостереженнями, на часовому інтервалі
 def computeSensitivityMatrix(parameters):
+    c2, c4, m1 = parameters
     return np.array([
         [0, 1, 0, 0, 0, 0],
-        [-(parameters[1] + parameters[0]) / m1, 0, parameters[1] / m1, 0, 0, 0],
+        [-(c2 + c1) / m1, 0, c2 / m1, 0, 0, 0],
         [0, 0, 0, 1, 0, 0],
-        [parameters[1] / parameters[2], 0, -(parameters[1] + c3) / parameters[2], 0, c3 / parameters[2], 0],
+        [c2 / m1, 0, -(c2 + c3) / m2, 0, c3 / m2, 0],
         [0, 0, 0, 0, 0, 1],
         [0, 0, c3 / m3, 0, -(c4 + c3) / m3, 0]
     ])
 
 def computeParameterDerivatives(states, parameters):
+    c2, c4, m1 = parameters
+ 
+    derivatives_param0 = np.array([
+        [0, 0, 0, 0, 0, 0],
+        [-(1 / m1), 0, (1 / m1), 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [(1 / m2), 0, -(1 / m2), 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0]
+    ])
+
+    derivatives_param1 = np.array([
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, -(1 / m3), 0]
+    ])
+
+    derivatives_param2 = np.array([
+        [0, 0, 0, 0, 0, 0],
+        [(c1 + c2) / m1 ** 2, 0, -c2 / m1 ** 2, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0]
+    ])
+    """
     derivatives_param0 = np.array([
         [0, 0, 0, 0, 0, 0],
         [- 1 / m1, 0, 0, 0, 0, 0],
@@ -47,6 +77,7 @@ def computeParameterDerivatives(states, parameters):
         [0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0]
     ])
+    """
 
     derivatives_param0 = derivatives_param0 @ states
     derivatives_param1 = derivatives_param1 @ states
@@ -100,7 +131,7 @@ def optimizeParameters(initial_parameters, start_time, end_time, time_step, tole
 
 
 if __name__ == "__main__":
-    initial_guess = np.array([0.1, 0.08, 21]) # початкове наближення
+    initial_guess = np.array([0.2, 0.1, 9]) # початкове наближення
     start_time = 0 # початок інтервалу
     end_time = 50 # кінець інтервалу
     time_step = 0.2 # крок
