@@ -1,121 +1,130 @@
 import numpy as np
-import sympy as sp
+import matplotlib.pyplot as plt
 
-def read(filename):
-    with open(filename, 'r') as f:
-        lines = f.readlines()
+# Зчитуємо спостереження з файлу та перетворюємо їх у масив numpy
+with open('y9.txt') as file:
+    observations = np.array([line.split() for line in file.readlines()], float).T
 
-        data = []
-        for line in lines:
-            values = line.strip().split()
-            data.append([float(v) for v in values])
+c1 = 0.14
+c3 = 0.2
+m2 = 28
+m3 = 18
+# c2, c4, m1 невідомі
 
-        y = np.array(data).T   
-        return y
+# Матриця утворена функцією чутливості, використовується для оцінки невідомих параметрів за відомими спостереженнями, на часовому інтервалі
+def computeSensitivityMatrix(parameters):
+    c2, c4, m1 = parameters
+    return np.array([
+        [0, 1, 0, 0, 0, 0],
+        [-(c2 + c1) / m1, 0, c2 / m1, 0, 0, 0],
+        [0, 0, 0, 1, 0, 0],
+        [c2 / m2, 0, -(c2 + c3) / m2, 0, c3 / m2, 0],
+        [0, 0, 0, 0, 0, 1],
+        [0, 0, c3 / m3, 0, -(c4 + c3) / m3, 0]
+    ])
+
+# Обчислюємо похідні параметрів
+def computeParameterDerivatives(states, parameters):
+    c2, c4, m1 = parameters
+ 
+    derivatives_param0 = np.array([
+        [0, 0, 0, 0, 0, 0],
+        [-(1 / m1), 0, (1 / m1), 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [(1 / m2), 0, -(1 / m2), 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0]
+    ])
+
+    derivatives_param1 = np.array([
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, -(1 / m3), 0]
+    ])
+
+    derivatives_param2 = np.array([
+        [0, 0, 0, 0, 0, 0],
+        [(c1 + c2) / m1 ** 2, 0, -c2 / m1 ** 2, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0]
+    ])
+    
+    derivatives_param0 = derivatives_param0 @ states
+    derivatives_param1 = derivatives_param1 @ states
+    derivatives_param2 = derivatives_param2 @ states
+    return np.array([derivatives_param0, derivatives_param1, derivatives_param2]).T
+
+# Обчислюємо динаміку моделі
+def computeModelDynamics(states, parameters):
+    return computeSensitivityMatrix(parameters) @ states
+
+# Оптимізуємо параметри
+def optimizeParameters(initial_parameters, start_time, end_time, time_step, tolerance):
+    time_points = np.linspace(start_time, end_time, int((end_time - start_time) / time_step + 1))
+
+    while True:
+        # Модельні стани
+        model_states = np.zeros_like(observations)
+        model_states[0] = observations[0].copy()
+
+        # Інтегруємо модель за методом Рунге-Кутта;
+        # знаходимо стани моделі у кожен часовий відрізок
+        for i in range(1, len(time_points)):
+            previous_state = model_states[i - 1]
+            k1 = time_step * computeModelDynamics(previous_state, initial_parameters)
+            k2 = time_step * computeModelDynamics(previous_state + k1 / 2, initial_parameters)
+            k3 = time_step * computeModelDynamics(previous_state + k2 / 2, initial_parameters)
+            k4 = time_step * computeModelDynamics(previous_state + k3, initial_parameters)
+            current_state = previous_state + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+            model_states[i] = current_state
+
+        # Інтегруємо функції чутливості
+        sensitivity_matrix = np.zeros((len(time_points), 6, 3))
+        parameter_derivatives = computeParameterDerivatives(model_states.T, initial_parameters)
+        sensitivity_coefficients = computeSensitivityMatrix(initial_parameters)
+        for i in range(1, len(time_points)):
+            k1 = time_step * (sensitivity_coefficients @ sensitivity_matrix[i - 1] + parameter_derivatives[i - 1])
+            k2 = time_step * (sensitivity_coefficients @ (sensitivity_matrix[i - 1] + k1 / 2) + parameter_derivatives[i - 1])
+            k3 = time_step * (sensitivity_coefficients @ (sensitivity_matrix[i - 1] + k2 / 2) + parameter_derivatives[i - 1])
+            k4 = time_step * (sensitivity_coefficients @ (sensitivity_matrix[i - 1] + k3) + parameter_derivatives[i - 1])
+            sensitivity_matrix[i] = sensitivity_matrix[i - 1] + (k1 + 2 * k2 + 2 * k3 + k4) / 6
+
+        # Оновлюємо параметри
+        sensitivity_derivatives = (np.array([u.T @ u for u in sensitivity_matrix]) * time_step).sum(0)
+        sensitivity_derivatives = np.linalg.inv(sensitivity_derivatives)
+        state_difference = (observations - model_states)
+        sensitivity_observations = (np.array([sensitivity_matrix[i].T @ state_difference[i] for i in range(len(time_points))]) * time_step).sum(0)
+        parameter_update = sensitivity_derivatives @ sensitivity_observations
+        initial_parameters += parameter_update
+
+        if np.abs((parameter_update)).max() < tolerance:
+            return initial_parameters, model_states
+
     
 
-def get_A():
-    A = [[0, 1, 0, 0, 0, 0,],
-         [-(c2 + c1) / m1, 0, c2 / m1, 0, 0, 0],
-         [0, 0, 0, 1, 0, 0],
-         [c2 / m2, 0, -(c2 + c3) / m2, 0, c3 / m2, 0],
-         [0, 0, 0, 0, 0, 1],
-         [0, 0, c3 / m3, 0, -(c4 + c3) / m3, 0]]
-    return sp.Matrix(A)
 
-def print_matrix(matrix, name='Matrix'):
-    print(f"\n{name}\n")
-    num_rows, num_cols = matrix.shape
-    max_widths = [max(len(str(matrix[i, j])) for i in range(num_rows)) for j in range(num_cols)]
-    for i in range(num_rows):
-        row_str = ""
-        for j in range(num_cols):
-            element = str(matrix[i, j])
-            padding = max_widths[j] - len(element)
-            row_str += element + ' ' * (padding + 1) + "\t\t"
-        print(row_str)
+if __name__ == "__main__":
+    initial_guess = np.array([0.2, 0.1, 9]) # початкове наближення
+    start_time = 0 # початок інтервалу
+    end_time = 50 # кінець інтервалу
+    time_step = 0.2 # крок
+    tolerance = 1e-15 # параметр точності
 
-def derivative_of_vector(y, b):
-    derivatives = [sp.diff(Yi, Bi) for Yi in y for Bi in b]
-    cols = len(b)
-    
-    derivative_matrix = [derivatives[i:i + cols] for i in range(0, len(derivatives), cols)]
-    return sp.Matrix(derivative_matrix)
+    solution, model_states = optimizeParameters(initial_guess, start_time, end_time, time_step, tolerance)
+    print("Solution is:", solution)
 
-def get_f(A, B, U):
-    return A @ U + B
-
-
-def get_U(A, B, U):
-    B = np.array(B.subs(beta_0)).tolist()
-    k1 = h * get_f(A, B, U)
-    k2 = h * get_f(A, B, U + k1 / 2)
-    k3 = h * get_f(A, B, U + k2 / 2)
-    k4 = h * get_f(A, B, U + k3)
-
-    return U + (k1 + 2 * k2 + 2 * k3 + k4) / 6
-
-def get_f_y(A, y):
-    return A @ y
-
-def get_y(A, y):
-    k1 = h * get_f_y(A, y)
-    k2 = h * get_f_y(A, y + k1 / 2)
-    k3 = h * get_f_y(A, y + k2 / 2)
-    k4 = h * get_f_y(A, y + k3)
-
-    return y + (k1 + 2 * k2 + 2 * k3 + k4) / 6
-
-y = read('y9.txt')
-
-h = 0.2
-
-c1, c2, c3, c4, m1, m2, m3 = sp.symbols('c1, c2, c3, c4, m1, m2, m3')
-beta_0 = {c2: 0.2, c4: 0.1, m1: 9}
-params = {c1: 0.14, c3: 0.2, m2: 28, m3: 18}
-beta = [c2, c4, m1]
-eps = 1e-16
-
-A_filled = get_A().subs(params)
-sp.pprint(A_filled)
-
-beta_vector = np.array([beta_0[c2], beta_0[c4], beta_0[m1]])
-while True:
-    A = np.array((A_filled.subs(beta_0)).tolist())
-    U = np.zeros((6, 3))
-
-    inv_integral = np.zeros((3, 3))
-    mult_integral = np.zeros((1, 3))
-    distance_integral = 0
-
-    y_approx = y[0]
-    for i in range(1, len(y)):
-        Ay = A @ sp.Matrix(y_approx)
-        B = derivative_of_vector(Ay, beta)
-
-        inv_prod = U.T @ U
-        inv_integral = (inv_integral + inv_prod).astype('float64')
-
-        mult_prod = U.T @ (y[i] - y_approx)
-        mult_integral = (mult_integral + mult_prod).astype('float64')
-
-        distance = (y[i] - y_approx).T @ (y[i] - y_approx)
-        distance_integral += distance
-
-        U = get_U(A, B, U)
-        y_approx = get_y(A, y_approx)
-    inv_integral = inv_integral * 0.2
-    mult_integral = mult_integral * 0.2
-    distance_integral = distance_integral * 0.2
-    
-    inv_integral = np.linalg.pinv(inv_integral)
-    mult_integral = mult_integral.flatten()
-    delta_beta = inv_integral @ mult_integral
-    beta_vector += delta_beta
-    beta_0 = {c2: beta_vector[0], c4: beta_vector[1], m1: beta_vector[2]}
-
-    print("Beta", beta_vector)
-    print("Distance", distance_integral)
-    if distance_integral < eps:
-        print("Converged, approx: ", beta_0)
-        break
+    # Графік спостережень vs моделі
+    """
+    time_points = np.linspace(start_time, end_time, len(observations))
+    plt.plot(time_points, observations.T[0], label='Observations')
+    plt.plot(time_points, model_states.T[0], label='Model')
+    plt.xlabel('Time')
+    plt.ylabel('State')
+    plt.legend()
+    plt.show()
+    """
