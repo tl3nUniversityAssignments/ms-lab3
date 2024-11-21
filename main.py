@@ -1,15 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-
-# Зчитуємо спостереження з файлу та перетворюємо їх у масив numpy
-with open('y9.txt') as file:
-    observations = np.array([line.split() for line in file.readlines()], float).T
-
-c1 = 0.14
-c3 = 0.2
-m2 = 28
-m3 = 18
-# c2, c4, m1 невідомі
 
 # Матриця утворена функцією чутливості, використовується для оцінки невідомих параметрів за відомими спостереженнями, на часовому інтервалі
 def computeSensitivityMatrix(parameters):
@@ -97,34 +86,40 @@ def optimizeParameters(initial_parameters, start_time, end_time, time_step, tole
         # Оновлюємо параметри
         sensitivity_derivatives = (np.array([u.T @ u for u in sensitivity_matrix]) * time_step).sum(0)
         sensitivity_derivatives = np.linalg.inv(sensitivity_derivatives)
+
         state_difference = (observations - model_states)
         sensitivity_observations = (np.array([sensitivity_matrix[i].T @ state_difference[i] for i in range(len(time_points))]) * time_step).sum(0)
+
+        quality_pointer = (np.array([state_difference[i].T @ state_difference[i] for i in range(len(time_points))]) * time_step).sum(0)
+
         parameter_update = sensitivity_derivatives @ sensitivity_observations
         initial_parameters += parameter_update
 
+        if np.abs((quality_pointer)).max() < tolerance:
+            return initial_parameters, quality_pointer
+
         if np.abs((parameter_update)).max() < tolerance:
-            return initial_parameters, model_states
+            return initial_parameters, quality_pointer
 
     
 
 
 if __name__ == "__main__":
+    # Зчитуємо спостереження з файлу та перетворюємо їх у масив numpy
+    with open('y9.txt') as file:
+        observations = np.array([line.split() for line in file.readlines()], float).T
+
+    c1 = 0.14
+    c3 = 0.2
+    m2 = 28
+    m3 = 18
+    # c2, c4, m1 невідомі
     initial_guess = np.array([0.2, 0.1, 9]) # початкове наближення
     start_time = 0 # початок інтервалу
     end_time = 50 # кінець інтервалу
     time_step = 0.2 # крок
-    tolerance = 1e-15 # параметр точності
+    tolerance = 1e-6 # параметр точності
 
-    solution, model_states = optimizeParameters(initial_guess, start_time, end_time, time_step, tolerance)
-    print("Solution is:", solution)
-
-    # Графік спостережень vs моделі
-    """
-    time_points = np.linspace(start_time, end_time, len(observations))
-    plt.plot(time_points, observations.T[0], label='Observations')
-    plt.plot(time_points, model_states.T[0], label='Model')
-    plt.xlabel('Time')
-    plt.ylabel('State')
-    plt.legend()
-    plt.show()
-    """
+    solution, quality_pointer = optimizeParameters(initial_guess, start_time, end_time, time_step, tolerance)
+    print(f"Ідентифіковані параметри: c2 = {solution[0]}, c4 = {solution[1]}, m1 = {solution[2]}")
+    print(f"Показник якості: {quality_pointer}")
